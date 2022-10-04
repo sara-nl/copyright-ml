@@ -1,0 +1,6 @@
+/venv
+/TheirStuff
+/.ipynb_checkpoints
+/main.py
+/*.csv
+/*.html
