@@ -3,3 +3,6 @@
 /.ipynb_checkpoints
 /Data
 /Images
+__pycache__
+.pytest_cache
+test_data.json
