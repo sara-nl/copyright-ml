@@ -148,6 +148,6 @@ class CopyrightXGBoost:
 
         output = dict()
         output["prediction"] = self._label_encoder.inverse_transform(prediction)[0]
-        output["prediction_probabilities"] = float(prediction_proba[0])
+        output["prediction_probability"] = float(prediction_proba[0])
 
         return output

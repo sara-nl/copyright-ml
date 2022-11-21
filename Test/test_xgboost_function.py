@@ -68,5 +68,5 @@ class TestCopyRightXGBoost:
         model_output = self.test_xgb.xgboost_prediction(self.test_datapoint)
 
         assert model_output["prediction"] in self.test_xgb._label_encoder.classes_
-        assert isinstance(model_output["prediction_probabilities"], float)
-        assert 0 <= model_output["prediction_probabilities"] <= 1
+        assert isinstance(model_output["prediction_probability"], float)
+        assert 0 <= model_output["prediction_probability"] <= 1
