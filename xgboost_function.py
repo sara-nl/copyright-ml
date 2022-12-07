@@ -9,14 +9,14 @@ from sklearn.preprocessing import LabelEncoder
 class CopyrightXGBoost:
     def __init__(self) -> None:
         self._xgb_model = xgb.XGBClassifier()
-        self._xgb_model.load_model("TrainedModels/xgboost_sql_data_9_11.json")
-
         self._label_encoder = LabelEncoder()
+        self._openaccesscolor_encoder = LabelEncoder()
+
+    def load_existing(self, model_filepath):
+        self._xgb_model.load_model(model_filepath)
         self._label_encoder.classes_ = np.load(
             "FittedEncoders/label_encoder_classes.npy", allow_pickle=True
         )
-
-        self._openaccesscolor_encoder = LabelEncoder()
         self._openaccesscolor_encoder.classes_ = np.load(
             "FittedEncoders/openaccescolor_encoder_classes.npy", allow_pickle=True
         )

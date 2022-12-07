@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import xgboost as xgb
@@ -10,6 +11,7 @@ from xgboost_function import CopyrightXGBoost
 class TestCopyRightXGBoost:
     def setup_method(self):
         self.test_xgb = CopyrightXGBoost()
+        self.test_xgb.load_existing(Path("TrainedModels/xgboost_sql_data_9_11.json"))
         with open("Test/test_data.json") as file:
             self.test_datapoint = json.load(file)
 
