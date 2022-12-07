@@ -72,3 +72,30 @@ class TestCopyRightXGBoost:
         assert model_output["prediction"] in self.test_xgb._label_encoder.classes_
         assert isinstance(model_output["prediction_probability"], float)
         assert 0 <= model_output["prediction_probability"] <= 1
+
+    def test_read_data(self, monkeypatch):
+        monkeypatch.setattr(self.test_xgb, "_fit_encoders", lambda *args: None)
+        x_data, y_data = self.test_xgb._read_data(
+            "./Test/test_data.csv", "this/does/not/matter"
+        )
+
+        assert x_data.shape == (2, 33)
+        assert y_data.shape == (2,)
+
+    def test_eval_model(self):
+        test_out_path = Path("./Test/out")
+        for child in test_out_path.glob("*"):
+            print(child)
+            if child.is_file():
+                child.unlink()
+
+        test_x_data = np.random.uniform(low=-0.5, high=2.5, size=(50, 33))
+        test_y_data = np.random.randint(low=0, high=6, size=(50,))
+
+        test_train_partition = 0.8
+
+        self.test_xgb._eval_model(
+            test_x_data, test_y_data, test_train_partition, test_out_path
+        )
+
+        assert Path("./Test/out/classification_report.json").exists()

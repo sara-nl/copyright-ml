@@ -1,9 +1,13 @@
+import csv
 import json
+from ast import literal_eval
 from math import isnan
 
 import numpy as np
 import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 
 
 class CopyrightXGBoost:
@@ -19,6 +23,23 @@ class CopyrightXGBoost:
         )
         self._openaccesscolor_encoder.classes_ = np.load(
             "FittedEncoders/openaccescolor_encoder_classes.npy", allow_pickle=True
+        )
+
+    def _fit_encoders(self, data, out_path):
+        labels = [datapoint["manual_classification"] for datapoint in data]
+        self._label_encoder.fit(labels)
+        np.save(
+            out_path / "label_encoder_classes.npy",
+            self._label_encoder.classes_,
+        )
+
+        # TODO: get all colors and fit and save new encoder
+        self._openaccesscolor_encoder.classes_ = np.load(
+            "FittedEncoders/openaccescolor_encoder_classes.npy", allow_pickle=True
+        )
+        np.save(
+            out_path / "openaccescolor_encoder_classes.npy",
+            self._openaccesscolor_encoder.classes_,
         )
 
     def _get_cols(self, extra_cols: set) -> list:
@@ -84,7 +105,7 @@ class CopyrightXGBoost:
         return datapoint
 
     def _process_openaccesscolor(self, datapoint: dict) -> dict:
-        if isnan(datapoint["openaccesscolor"]):
+        if datapoint["openaccesscolor"] == "" or isnan(datapoint["openaccesscolor"]):
             datapoint["openaccesscolor"] = "nan"
         datapoint["openaccesscolor"] = int(
             self._openaccesscolor_encoder.transform(
@@ -129,7 +150,13 @@ class CopyrightXGBoost:
             "images_same_pagecount",
             "Minder dan 50 woorden per pagina",
         ]
-        values = [datapoint[feature] for feature in input_features]
+
+        values = [
+            literal_eval(datapoint[feature])
+            if (type(datapoint[feature]) == str)
+            else datapoint[feature]
+            for feature in input_features
+        ]
 
         return np.asarray(values).reshape((1, -1))
 
@@ -140,6 +167,50 @@ class CopyrightXGBoost:
 
         input_features = self._get_input_features(datapoint)
         return input_features
+
+    def _read_data(self, data_filepath, out_path):
+        with open(data_filepath) as file:
+            reader = csv.DictReader(file)
+            data = list(reader)
+        self._fit_encoders(data, out_path)
+        x_data = np.asarray(
+            [self._process_datapoint(datapoint).squeeze() for datapoint in data]
+        )
+        y_data = self._label_encoder.transform(
+            [datapoint["manual_classification"] for datapoint in data]
+        )
+        return x_data, y_data
+
+    def _eval_model(self, x_data, y_data, train_partition, out_path):
+        x_train, x_test, y_train, y_test = train_test_split(
+            x_data, y_data, train_size=train_partition
+        )
+
+        self._xgb_model.fit(x_train, y_train)
+
+        predictions = self._xgb_model.predict(x_test)
+        report = classification_report(
+            y_test,
+            predictions,
+            target_names=self._label_encoder.classes_,
+            labels=np.unique(y_data),
+            output_dict=True,
+            zero_division=0,
+        )
+
+        print(type(out_path))
+        print(out_path)
+
+        with open(
+            out_path / "classification_report.json", "w", encoding="utf-8"
+        ) as file:
+            json.dump(report, file, ensure_ascii=False)
+
+    def train_xgboost(self, data_filepath, out_path, train_partition):
+        x_data, y_data = self._read_data(data_filepath, out_path)
+        self._eval_model(x_data, y_data, train_partition, out_path)
+        self._xgb_model.fit(x_data, y_data)
+        self._xgb_model.save_model(out_path / "xgboost.json")
 
     def xgboost_prediction(self, datapoint: dict) -> dict:
         input_features = self._process_datapoint(datapoint)
