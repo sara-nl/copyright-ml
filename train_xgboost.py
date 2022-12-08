@@ -1,17 +1,5 @@
 import argparse
-import json
 from pathlib import Path
-
-import numpy as np
-import pandas as pd
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import classification_report
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import ConfusionMatrixDisplay
-import xgboost as xgb
-import matplotlib.pyplot as plt
 
 from xgboost_function import CopyrightXGBoost
 
