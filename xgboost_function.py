@@ -211,12 +211,6 @@ class CopyrightXGBoost:
         
         print(f"Skipped {skipped} datapoints without data, remaining {len(x_data)}")
 
-        # x_data = np.asarray(
-        #     [self._process_datapoint(datapoint).squeeze() for datapoint in data]
-        # )
-        # y_data = self._label_encoder.transform(
-        #     [datapoint["V2 - Licentie Nodig"] for datapoint in data]
-        # )
         return x_data, y_data, lengte_data
 
     def _eval_model(self, x_data, y_data, lengte_data, train_partition, out_path, use_class_weights=False):
@@ -257,6 +251,9 @@ class CopyrightXGBoost:
         
         # Save confusion matrix as image
         self._create_confusion_matrix_plots(cm, class_names, out_path)
+        
+        # Generate binary confusion matrix (4-class to 2-class mapping)
+        self._create_binary_confusion_matrix(y_test, predictions, out_path)
         
         # Generate subgroup confusion matrices by "V2 - Lengte"
         self._save_subgroup_confusion_matrices(y_test, predictions, lengte_test, class_names, out_path)
@@ -447,7 +444,6 @@ class CopyrightXGBoost:
         print(f"  - Normalized: {out_path / f'{filename_prefix}_normalized.png'}")
 
 
-
     def _save_subgroup_confusion_matrices(self, y_test, predictions, lengte_test, class_names, out_path):
         """Generate and save separate confusion matrices for each subgroup based on V2 - Lengte"""
         
@@ -500,20 +496,82 @@ class CopyrightXGBoost:
             )
 
     def _save_subgroup_classification_report(self, y_test_subgroup, predictions_subgroup, unique_labels, safe_lengte_name, subgroup_dir, lengte_value):
-        """Save classification report for a subgroup"""
+        """Save classification report for a subgroup or for binary report"""
         try:
+            # If unique_labels are strings (e.g., for binary), use them directly
+            if all(isinstance(lbl, str) for lbl in unique_labels):
+                target_names = unique_labels
+                labels = unique_labels
+            else:
+                target_names = [self._label_encoder.classes_[i] for i in unique_labels]
+                labels = unique_labels
             subgroup_report = classification_report(
                 y_test_subgroup,
                 predictions_subgroup,
-                target_names=[self._label_encoder.classes_[i] for i in unique_labels],
-                labels=unique_labels,
+                target_names=target_names,
+                labels=labels,
                 output_dict=True,
                 zero_division=0,
             )
-            
             # Save subgroup report
             with open(subgroup_dir / f"classification_report_{safe_lengte_name}.json", "w", encoding="utf-8") as file:
                 json.dump(subgroup_report, file, ensure_ascii=False, indent=2)
-                
         except Exception as e:
             print(f"Warning: Could not generate classification report for subgroup '{lengte_value}': {e}")
+
+    def _map_to_binary_labels(self, labels):
+        """Map 4-class labels to binary labels according to:
+        Eigen Werk -> Nee
+        Ja -> Ja  
+        Open Access -> Nee
+        Nee -> Nee
+        """
+        binary_labels = []
+        for label in labels:
+            # Get the original string label
+            original_label = self._label_encoder.inverse_transform([label])[0]
+            if original_label == "Ja":
+                binary_labels.append("Ja")
+            else:  # Eigen Werk, Open Access, or Nee all map to "Nee"
+                binary_labels.append("Nee")
+        return np.array(binary_labels)
+
+    def _create_binary_confusion_matrix(self, y_test, predictions, out_path):
+        """Create binary confusion matrix by mapping 4-class labels to binary labels"""
+        
+        # Map both true labels and predictions to binary
+        y_test_binary = self._map_to_binary_labels(y_test)
+        predictions_binary = self._map_to_binary_labels(predictions)
+        
+        # Create binary confusion matrix
+        binary_cm = confusion_matrix(y_test_binary, predictions_binary, labels=["Nee", "Ja"])
+        binary_class_names = ["Nee", "Ja"]
+        
+        print(f"Binary confusion matrix shape: {binary_cm.shape}")
+        
+        # Create binary confusion matrix plots
+        self._create_confusion_matrix_plots(
+            binary_cm, 
+            binary_class_names, 
+            out_path, 
+            title_suffix=" (Binary: Ja vs Nee)",
+            filename_prefix="confusion_matrix_binary"
+        )
+        
+        # Generate binary classification report
+        binary_report = classification_report(
+            y_test_binary,
+            predictions_binary,
+            target_names=binary_class_names,
+            labels=binary_class_names,
+            output_dict=True,
+            zero_division=0,
+        )
+        
+        # Save binary classification report using existing function
+        self._save_subgroup_classification_report(
+            y_test_binary, predictions_binary, ["Nee", "Ja"], 
+            "binary", out_path, "binary"
+        )
+        
+        return binary_cm, binary_report
