@@ -6,7 +6,7 @@ from xgboost_function import CopyrightXGBoost
 
 def main(args: argparse.Namespace):
     xgboost = CopyrightXGBoost(args.random_state)
-    xgboost.train_xgboost(Path(args.data), Path(args.out), args.train, args.use_class_weights)
+    xgboost.train_xgboost(Path(args.data), Path(args.out), args.train, args)
 
 
 if __name__ == "__main__":
@@ -40,9 +40,22 @@ if __name__ == "__main__":
         action="store_true",
         help="apply class weights to handle class imbalance",
     )
-    
+    parser.add_argument(
+        "--create_binary_conf_matrix",
+        action="store_true",
+        help="Create a binary confusion matrix for evaluation",
+    )
+    parser.add_argument(
+        "--preprocessing_option",
+        type=str,
+        choices=["binary_model", "remove_nee", "nee_to_eigenwerk"],
+        default=None,
+        help="Preprocessing option: 'binary_model' (map Eigen Werk & Open Access to Nee), "
+             "'remove_nee' (drop all Nee labels), 'nee_to_eigenwerk' (map Nee to Eigen Werk)"
+    )
+
     args = parser.parse_args()
-    
+
     # create output directory if it does not exist
     Path(args.out).mkdir(parents=True, exist_ok=True)
 

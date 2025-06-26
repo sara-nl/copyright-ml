@@ -13,6 +13,8 @@ from sklearn.utils.class_weight import compute_sample_weight
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from preprocessing_utils import apply_preprocessing_option
+
 INPUT_FEATURES = [
     "filestatus",
     "isfilepublished",
@@ -180,6 +182,7 @@ class CopyrightXGBoost:
             if feature in datapoint and (
                 datapoint[feature] is not None
                 and datapoint[feature] != ""
+                and not pd.isna(datapoint[feature])  # Handle pandas NaN values
                 and not (isinstance(datapoint[feature], str) and datapoint[feature].isspace())
             ):
                 any_input = True
@@ -187,18 +190,28 @@ class CopyrightXGBoost:
 
         return any_input
 
-    def _read_data(self, data_filepath, out_path):
-        with open(data_filepath) as file:
-            reader = csv.DictReader(file, delimiter="\t")
-            data = list(reader)
-        # filter out the warnings here such that it does not become a label
-        data = [datapoint for datapoint in data if not datapoint["V2 - Licentie Nodig"] == "WARNING"]
+    def _read_data(self, data_filepath, out_path, preprocessing_option=None):
+        # Load data using pandas
+        df = pd.read_csv(data_filepath, sep="\t")
+        
+        # Filter out the warnings before processing
+        df = df[df["V2 - Licentie Nodig"] != "WARNING"]
+        print(f"Loaded {len(df)} datapoints after filtering out warnings")
+        
+        # Apply preprocessing option if specified
+        if preprocessing_option:
+            print(f"Applying preprocessing option: {preprocessing_option}")
+            df = apply_preprocessing_option(df, preprocessing_option)
+        
+        # Convert dataframe to list of dictionaries for existing processing logic
+        data = df.to_dict('records')
         self._fit_encoders(data, out_path)
 
         x_data = []
         y_data = []
         lengte_data = []  # Store the "V2 - Lengte" column values
         skipped = 0
+        
         for datapoint in data:
             if self._check_if_datapoint_has_data(datapoint):
                 x_data.append(self._process_datapoint(datapoint))
@@ -210,10 +223,9 @@ class CopyrightXGBoost:
                 skipped += 1
         
         print(f"Skipped {skipped} datapoints without data, remaining {len(x_data)}")
-
         return x_data, y_data, lengte_data
 
-    def _eval_model(self, x_data, y_data, lengte_data, train_partition, out_path, use_class_weights=False):
+    def _eval_model(self, x_data, y_data, lengte_data, train_partition, out_path, use_class_weights=False, create_binary_conf_matrix=False):
         # Ensure y_data is a proper numpy array
         y_data = np.asarray(y_data)
         lengte_data = np.asarray(lengte_data)
@@ -252,23 +264,24 @@ class CopyrightXGBoost:
         # Save confusion matrix as image
         self._create_confusion_matrix_plots(cm, class_names, out_path)
         
-        # Generate binary confusion matrix (4-class to 2-class mapping)
-        self._create_binary_confusion_matrix(y_test, predictions, out_path)
+        if create_binary_conf_matrix:
+            # Generate binary confusion matrix (4-class to 2-class mapping)
+            self._create_binary_confusion_matrix(y_test, predictions, out_path)
         
         # Generate subgroup confusion matrices by "V2 - Lengte"
         self._save_subgroup_confusion_matrices(y_test, predictions, lengte_test, class_names, out_path)
 
-    def train_xgboost(self, data_filepath, out_path, train_partition, use_class_weights=False):
+    def train_xgboost(self, data_filepath, out_path, train_partition, args):
         self._xgb_model = xgb.XGBClassifier(random_state=self._random_state)
-        x_data, y_data, lengte_data = self._read_data(data_filepath, out_path)
+        x_data, y_data, lengte_data = self._read_data(data_filepath, out_path, args.preprocessing_option)
         x_data = np.asarray(x_data, dtype=object).squeeze()
         y_data = np.asarray(y_data)  # Ensure y_data is a proper numpy array
         lengte_data = np.asarray(lengte_data)  # Ensure lengte_data is a proper numpy array
-        self._eval_model(x_data, y_data, lengte_data, train_partition, out_path, use_class_weights)
+        self._eval_model(x_data, y_data, lengte_data, train_partition, out_path, args.use_class_weights, args.create_binary_conf_matrix)
         
         # Apply class weights to the final model training as well
         sample_weight = None
-        if use_class_weights:
+        if args.use_class_weights:
             sample_weight = compute_sample_weight('balanced', y_data)
         
         self._xgb_model.fit(x_data, y_data, sample_weight=sample_weight)
@@ -363,24 +376,27 @@ class CopyrightXGBoost:
 
     def _create_confusion_matrix_plots(self, cm, class_names, out_path, title_suffix="", filename_prefix="confusion_matrix"):
         """Create confusion matrix plots using seaborn"""
-        # Create figure with subplots for both raw and normalized matrices
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+        # Calculate accuracy from confusion matrix
+        accuracy = np.trace(cm) / np.sum(cm)
         
-        # Raw confusion matrix
-        sns.heatmap(cm, 
-                    annot=True, 
-                    fmt='d', 
-                    cmap='Blues', 
-                    xticklabels=class_names, 
-                    yticklabels=class_names,
-                    cbar_kws={'label': 'Count'},
-                    ax=ax1)
+        # # Create figure with subplots for both raw and normalized matrices
+        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
         
-        raw_title = f'Confusion Matrix{title_suffix} (Raw Counts)' if title_suffix else 'Confusion Matrix (Raw Counts)'
-        ax1.set_title(raw_title, fontsize=14, fontweight='bold')
-        ax1.set_xlabel('Predicted Label', fontsize=11)
-        ax1.set_ylabel('True Label', fontsize=11)
-        ax1.tick_params(axis='x', rotation=45)
+        # # Raw confusion matrix
+        # sns.heatmap(cm, 
+        #             annot=True, 
+        #             fmt='d', 
+        #             cmap='Blues', 
+        #             xticklabels=class_names, 
+        #             yticklabels=class_names,
+        #             cbar_kws={'label': 'Count'},
+        #             ax=ax1)
+        
+        # raw_title = f'Confusion Matrix{title_suffix} (Raw Counts) - Accuracy: {accuracy:.3f}' if title_suffix else f'Confusion Matrix (Raw Counts) - Accuracy: {accuracy:.3f}'
+        # ax1.set_title(raw_title, fontsize=14, fontweight='bold')
+        # ax1.set_xlabel('Predicted Label', fontsize=11)
+        # ax1.set_ylabel('True Label', fontsize=11)
+        # ax1.tick_params(axis='x', rotation=45)
         
         # Normalized confusion matrix (by row - true class)
         cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
@@ -396,28 +412,28 @@ class CopyrightXGBoost:
                 row.append(f'{count}\n({percentage:.1f}%)')
             annotations.append(row)
         
-        sns.heatmap(cm_normalized, 
-                    annot=annotations, 
-                    fmt='', 
-                    cmap='Blues', 
-                    xticklabels=class_names, 
-                    yticklabels=class_names,
-                    cbar_kws={'label': 'Proportion'},
-                    ax=ax2,
-                    vmin=0, vmax=1)
+        # sns.heatmap(cm_normalized, 
+        #             annot=annotations, 
+        #             fmt='', 
+        #             cmap='Blues', 
+        #             xticklabels=class_names, 
+        #             yticklabels=class_names,
+        #             cbar_kws={'label': 'Proportion'},
+        #             ax=ax2,
+        #             vmin=0, vmax=1)
         
-        norm_title = f'Confusion Matrix{title_suffix} (Normalized)' if title_suffix else 'Confusion Matrix (Normalized by True Class)'
-        ax2.set_title(norm_title, fontsize=14, fontweight='bold')
-        ax2.set_xlabel('Predicted Label', fontsize=11)
-        ax2.set_ylabel('True Label', fontsize=11)
-        ax2.tick_params(axis='x', rotation=45)
+        # norm_title = f'Confusion Matrix{title_suffix} (Normalized) - Accuracy: {accuracy:.3f}' if title_suffix else f'Confusion Matrix (Normalized by True Class) - Accuracy: {accuracy:.3f}'
+        # ax2.set_title(norm_title, fontsize=14, fontweight='bold')
+        # ax2.set_xlabel('Predicted Label', fontsize=11)
+        # ax2.set_ylabel('True Label', fontsize=11)
+        # ax2.tick_params(axis='x', rotation=45)
         
-        # Adjust layout and save
-        plt.tight_layout()
-        plt.savefig(out_path / f"{filename_prefix}.png", dpi=300, bbox_inches='tight')
-        plt.close()
+        # # Adjust layout and save
+        # plt.tight_layout()
+        # plt.savefig(out_path / f"{filename_prefix}.png", dpi=300, bbox_inches='tight')
+        # plt.close()
         
-        # Save individual normalized matrix
+        # # Save individual normalized matrix
         plt.figure(figsize=(10, 8))
         sns.heatmap(cm_normalized, 
                     annot=annotations, 
@@ -427,8 +443,8 @@ class CopyrightXGBoost:
                     yticklabels=class_names,
                     cbar_kws={'label': 'Proportion'},
                     vmin=0, vmax=1)
-        
-        norm_standalone_title = f'Confusion Matrix{title_suffix} (Normalized)' if title_suffix else 'Confusion Matrix (Normalized by True Class)'
+
+        norm_standalone_title = f'Confusion Matrix{title_suffix} (Normalized) - Accuracy: {accuracy:.3f}' if title_suffix else f'Confusion Matrix (Normalized by True Class) - Accuracy: {accuracy:.3f}'
         plt.title(norm_standalone_title, fontsize=16, fontweight='bold')
         plt.xlabel('Predicted Label', fontsize=12)
         plt.ylabel('True Label', fontsize=12)
@@ -441,7 +457,7 @@ class CopyrightXGBoost:
         
         print(f"Confusion matrices saved:")
         print(f"  - Combined: {out_path / f'{filename_prefix}.png'}")
-        print(f"  - Normalized: {out_path / f'{filename_prefix}_normalized.png'}")
+        # print(f"  - Normalized: {out_path / f'{filename_prefix}_normalized.png'}")
 
 
     def _save_subgroup_confusion_matrices(self, y_test, predictions, lengte_test, class_names, out_path):
@@ -449,7 +465,7 @@ class CopyrightXGBoost:
         
         # Get unique values of "V2 - Lengte"
         unique_lengte_values = np.unique(lengte_test)
-        print(f"Found subgroups in V2 - Lengte: {unique_lengte_values}")
+        print(f"Found subgroups in label: {unique_lengte_values}")
         
         # Create a subdirectory for subgroup matrices
         subgroup_dir = out_path / "subgroup_confusion_matrices"
